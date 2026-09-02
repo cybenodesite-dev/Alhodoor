@@ -88,7 +88,7 @@
     <!-- Firebase SDK v10 -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collectionGroup, getDocs, doc, getDoc, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collectionGroup, query, where, getDocs, doc, getDoc, collection } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBdKoZ_EHdA_josjJYVl_4aqLarSoNL808",
@@ -107,10 +107,10 @@
         window.fetchStudentData = async function(studentId) {
             const statusMsg = document.getElementById('status-message');
             statusMsg.className = "mt-3 p-3 rounded-xl text-xs font-medium bg-blue-50 text-blue-600 block";
-            statusMsg.innerText = "جاري البحث عن بيانات الطالب والإحصائيات...";
+            statusMsg.innerText = "جاري جلب بيانات الطالب...";
 
             try {
-                // 1. البحث الشامل في المجموعات الفرعية عن الطالب
+                // 1. البحث عن الطالب في كولكشن الطلاب
                 const studentsSnap = await getDocs(collectionGroup(db, 'students'));
                 let studentDoc = null;
                 let teacherId = "";
@@ -119,76 +119,77 @@
                     if (docSnap.id === studentId) {
                         studentDoc = docSnap.data();
                         const pathSegments = docSnap.ref.path.split('/');
-                        // المسار بيكون: users / {teacherId} / students / {studentId}
-                        teacherId = pathSegments[1];
+                        teacherId = pathSegments[1]; // معرف المدرس
                     }
                 });
 
                 if (!studentDoc) {
-                    throw new Error("لم يتم العثور على بيانات الطالب. تأكد من كود الـ QR.");
+                    throw new Error("لم يتم العثور على طالب بهذا الكود.");
                 }
 
-                // 2. جلب اسم المدرس
+                // 2. جلب اسم المعلم
                 let teacherName = "غير محدد";
                 if (teacherId) {
                     const teacherSnap = await getDoc(doc(db, "users", teacherId));
                     if (teacherSnap.exists()) {
                         const tData = teacherSnap.data();
-                        teacherName = tData.displayName || tData.name || tData.fullName || "المدرس المسجل";
+                        teacherName = tData.displayName || tData.name || "المدرس المسجل";
                     }
                 }
 
-                // عرض الاسم والصف
-                const name = studentDoc.name || studentDoc.studentName || studentDoc.fullName || "بدون اسم";
+                const name = studentDoc.name || studentDoc.studentName || "بدون اسم";
                 document.getElementById('student-name').innerText = name;
-                document.getElementById('student-grade').innerText = studentDoc.grade || studentDoc.class || studentDoc.gradeName || "غير محدد";
+                document.getElementById('student-grade').innerText = studentDoc.grade || studentDoc.gradeName || "غير محدد";
                 document.getElementById('teacher-name').innerText = teacherName;
                 document.getElementById('student-avatar').innerText = name[0] || "ط";
 
-                // 3. جلب بيانات الفرعيات بالطريقتين (Direct Path + CollectionGroup) لضمان القراءة
                 let absences = 0, paid = 0, due = 0, examAvg = 0;
 
                 if (teacherId) {
-                    // أ) الحضور والغياب
-                    const attSnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/attendance`));
+                    // أ) جلب الغياب من users/{teacherId}/attendance بفلترة studentId (كما بالصورة 4)
+                    const attQuery = query(collection(db, `users/${teacherId}/attendance`), where("studentId", "==", studentId));
+                    const attSnap = await getDocs(attQuery);
                     attSnap.forEach(d => {
-                        const val = d.data();
-                        if (val.status === 'absent' || val.type === 'absent' || val.state === 'غائب' || val.absent === true) {
+                        if (d.data().status === 'absent' || d.data().status === 'غائب') {
                             absences++;
                         }
                     });
 
-                    // ب) المدفوعات ومتأخراتها
-                    const paySnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/payments`));
-                    paySnap.forEach(d => {
-                        const val = d.data();
-                        paid += Number(val.amountPaid || val.paid || val.amount || val.paidAmount || 0);
-                        due += Number(val.amountDue || val.due || val.remaining || val.lateAmount || 0);
-                    });
-
-                    // ج) الامتحانات
-                    const examSnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/exams`));
+                    // ب) جلب الامتحانات من users/{teacherId}/exams بفلترة studentId (كما بالصورة 5)
+                    const examQuery = query(collection(db, `users/${teacherId}/exams`), where("studentId", "==", studentId));
+                    const examSnap = await getDocs(examQuery);
                     let totalScore = 0, totalMax = 0, count = 0;
+                    
                     examSnap.forEach(d => {
                         const val = d.data();
-                        const score = val.score !== undefined ? val.score : (val.degree !== undefined ? val.degree : val.mark);
-                        const max = val.totalScore || val.maxScore || 100;
-                        if (score !== undefined) {
-                            totalScore += Number(score);
-                            totalMax += Number(max);
+                        if (val.score !== undefined) {
+                            totalScore += Number(val.score);
+                            totalMax += Number(val.totalScore || 100);
                             count++;
                         }
                     });
 
                     if (count > 0) {
-                        examAvg = Math.round((totalScore / (count * 100)) * 100); // حساب النسبة المئوية
-                        if (isNaN(examAvg) || examAvg > 100) {
-                            examAvg = Math.round(totalScore / count);
-                        }
+                        examAvg = Math.round((totalScore / totalMax) * 100);
+                    }
+
+                    // ج) جلب المدفوعات (من ملف الطالب نفسه أو Subcollection)
+                    if (studentDoc.payments && Array.isArray(studentDoc.payments)) {
+                        studentDoc.payments.forEach(p => {
+                            paid += Number(p.amountPaid || p.amount || 0);
+                            due += Number(p.amountDue || p.due || 0);
+                        });
+                    } else {
+                        const paySnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/payments`));
+                        paySnap.forEach(d => {
+                            const val = d.data();
+                            paid += Number(val.amountPaid || val.paid || 0);
+                            due += Number(val.amountDue || val.due || 0);
+                        });
                     }
                 }
 
-                // إظهار الأرقام النهائية
+                // تحديث الأرقام
                 document.getElementById('stat-payments').innerText = paid + " ج.م";
                 document.getElementById('stat-due').innerText = due + " ج.م";
                 document.getElementById('stat-absence').innerText = absences + " أيام";
@@ -216,7 +217,7 @@
                     window.fetchStudentData(cleanedCode);
                 })
                 .catch(() => {
-                    alert("تعذر قراءة الـ QR من هذه الصورة. جرب اختيار صورة أوضح.");
+                    alert("تعذر قراءة الـ QR من هذه الصورة. جرب صورة أوضح.");
                 });
         }
     </script>
