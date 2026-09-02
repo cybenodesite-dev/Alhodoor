@@ -30,7 +30,7 @@
                 <i class="fa-solid fa-qrcode text-xl"></i>
             </div>
             <h2 class="text-base font-bold text-slate-800">مسح / رفع كود QR الطالب</h2>
-            <p class="text-xs text-slate-500 mt-1 mb-4">ارفع صورة الـ QR للوصول الفوري للتقرير الكامل</p>
+            <p class="text-xs text-slate-500 mt-1 mb-4">ارفع صورة الـ QR للوصول الفوري للتقرير الكامل مقسم بالشهور</p>
 
             <input type="file" id="qr-input" accept="image/*" class="hidden" onchange="scanQRFromFile(event)">
 
@@ -44,7 +44,7 @@
             <div id="reader" class="hidden mt-2"></div>
         </section>
 
-        <!-- كارت إحصائيات الطالب -->
+        <!-- كارت بيانات وإحصائيات الطالب -->
         <section id="student-card" class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hidden space-y-4">
             
             <!-- البيانات الأساسية -->
@@ -59,26 +59,38 @@
                 </div>
             </div>
 
-            <!-- شبكة الإحصائيات -->
+            <!-- شبكة الإحصائيات الإجمالية -->
             <div class="grid grid-cols-2 gap-3">
                 <div class="bg-emerald-50/80 border border-emerald-100 p-3 rounded-xl">
-                    <span class="block text-xs font-semibold text-emerald-700 mb-1"><i class="fa-solid fa-wallet ml-1"></i> المدفوعات</span>
+                    <span class="block text-xs font-semibold text-emerald-700 mb-1"><i class="fa-solid fa-wallet ml-1"></i> إجمالي المدفوعات</span>
                     <strong id="stat-payments" class="text-base font-bold text-emerald-900">0 ج.م</strong>
                 </div>
 
                 <div class="bg-rose-50/80 border border-rose-100 p-3 rounded-xl">
-                    <span class="block text-xs font-semibold text-rose-700 mb-1"><i class="fa-solid fa-circle-exclamation ml-1"></i> المتأخرات</span>
+                    <span class="block text-xs font-semibold text-rose-700 mb-1"><i class="fa-solid fa-circle-exclamation ml-1"></i> إجمالي المتأخرات</span>
                     <strong id="stat-due" class="text-base font-bold text-rose-900">0 ج.م</strong>
                 </div>
 
                 <div class="bg-amber-50/80 border border-amber-100 p-3 rounded-xl">
-                    <span class="block text-xs font-semibold text-amber-700 mb-1"><i class="fa-solid fa-user-xmark ml-1"></i> الغياب</span>
+                    <span class="block text-xs font-semibold text-amber-700 mb-1"><i class="fa-solid fa-user-xmark ml-1"></i> إجمالي الغياب</span>
                     <strong id="stat-absence" class="text-base font-bold text-amber-900">0 أيام</strong>
                 </div>
 
                 <div class="bg-blue-50/80 border border-blue-100 p-3 rounded-xl">
-                    <span class="block text-xs font-semibold text-blue-700 mb-1"><i class="fa-solid fa-chart-line ml-1"></i> الاختبارات</span>
+                    <span class="block text-xs font-semibold text-blue-700 mb-1"><i class="fa-solid fa-chart-line ml-1"></i> متوسط الاختبارات</span>
                     <strong id="stat-score" class="text-base font-bold text-blue-900">0%</strong>
+                </div>
+            </div>
+
+            <!-- التقرير الشهري المنظم -->
+            <div class="pt-2">
+                <h4 class="font-bold text-slate-800 text-sm mb-3 flex items-center gap-1.5">
+                    <i class="fa-solid fa-calendar-days text-indigo-600"></i>
+                    <span>التقرير الشهري التفصيلي</span>
+                </h4>
+
+                <div id="monthly-container" class="space-y-3">
+                    <!-- سيتم إضافة الشهور ديناميكيًا هنا -->
                 </div>
             </div>
         </section>
@@ -104,13 +116,19 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
+        // أسماء الشهور بالعربية
+        const monthNames = [
+            "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+            "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+        ];
+
         window.fetchStudentData = async function(studentId) {
             const statusMsg = document.getElementById('status-message');
             statusMsg.className = "mt-3 p-3 rounded-xl text-xs font-medium bg-blue-50 text-blue-600 block";
-            statusMsg.innerText = "جاري جلب بيانات الطالب...";
+            statusMsg.innerText = "جاري جلب بيانات الطالب وتجهيز التقرير الشهري...";
 
             try {
-                // 1. البحث عن الطالب في كولكشن الطلاب
+                // 1. البحث عن الطالب في كافة كولكشنز الطلاب
                 const studentsSnap = await getDocs(collectionGroup(db, 'students'));
                 let studentDoc = null;
                 let teacherId = "";
@@ -119,7 +137,7 @@
                     if (docSnap.id === studentId) {
                         studentDoc = docSnap.data();
                         const pathSegments = docSnap.ref.path.split('/');
-                        teacherId = pathSegments[1]; // معرف المدرس
+                        teacherId = pathSegments[1];
                     }
                 });
 
@@ -127,7 +145,7 @@
                     throw new Error("لم يتم العثور على طالب بهذا الكود.");
                 }
 
-                // 2. جلب اسم المعلم
+                // 2. جلب اسم المدرس
                 let teacherName = "غير محدد";
                 if (teacherId) {
                     const teacherSnap = await getDoc(doc(db, "users", teacherId));
@@ -143,57 +161,187 @@
                 document.getElementById('teacher-name').innerText = teacherName;
                 document.getElementById('student-avatar').innerText = name[0] || "ط";
 
-                let absences = 0, paid = 0, due = 0, examAvg = 0;
+                // هيكل لتجميع البيانات حسب الشهر (YYYY-MM)
+                const monthlyData = {};
+
+                const getMonthKey = (dateVal) => {
+                    if (!dateVal) return "غير محدد";
+                    let d;
+                    if (dateVal.toDate) {
+                        d = dateVal.toDate();
+                    } else {
+                        d = new Date(dateVal);
+                    }
+                    if (isNaN(d.getTime())) {
+                        if (typeof dateVal === 'string' && dateVal.length >= 7) return dateVal.substring(0, 7);
+                        return "غير محدد";
+                    }
+                    const year = d.getFullYear();
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    return `${year}-${month}`;
+                };
+
+                const ensureMonth = (key) => {
+                    if (!monthlyData[key]) {
+                        monthlyData[key] = {
+                            absences: 0,
+                            paid: 0,
+                            due: 0,
+                            exams: []
+                        };
+                    }
+                };
+
+                let totalAbsences = 0, totalPaid = 0, totalDue = 0;
+                let totalExamScore = 0, totalExamMax = 0, examCount = 0;
 
                 if (teacherId) {
-                    // أ) جلب الغياب من users/{teacherId}/attendance بفلترة studentId (كما بالصورة 4)
-                    const attQuery = query(collection(db, `users/${teacherId}/attendance`), where("studentId", "==", studentId));
-                    const attSnap = await getDocs(attQuery);
+                    // أ) جلب سجلات الغياب (سواء بـ studentId أو studentDocId)
+                    const attSnap = await getDocs(collection(db, `users/${teacherId}/attendance`));
                     attSnap.forEach(d => {
-                        if (d.data().status === 'absent' || d.data().status === 'غائب') {
-                            absences++;
+                        const val = d.data();
+                        if (val.studentId === studentId || val.studentDocId === studentId) {
+                            if (val.status === 'absent' || val.status === 'غائب') {
+                                totalAbsences++;
+                                const key = getMonthKey(val.date || val.createdAt);
+                                ensureMonth(key);
+                                monthlyData[key].absences++;
+                            }
                         }
                     });
 
-                    // ب) جلب الامتحانات من users/{teacherId}/exams بفلترة studentId (كما بالصورة 5)
-                    const examQuery = query(collection(db, `users/${teacherId}/exams`), where("studentId", "==", studentId));
-                    const examSnap = await getDocs(examQuery);
-                    let totalScore = 0, totalMax = 0, count = 0;
-                    
+                    // ب) جلب سجلات الامتحانات (سواء بـ studentId أو داخل النتيجة نفسها)
+                    const examSnap = await getDocs(collection(db, `users/${teacherId}/exams`));
                     examSnap.forEach(d => {
                         const val = d.data();
-                        if (val.score !== undefined) {
-                            totalScore += Number(val.score);
-                            totalMax += Number(val.totalScore || 100);
-                            count++;
+                        let studentResult = null;
+                        if (val.studentId === studentId) {
+                            studentResult = val;
+                        } else if (val.results && Array.isArray(val.results)) {
+                            studentResult = val.results.find(r => r.studentId === studentId || r.id === studentId);
+                        } else if (val.scores && val.scores[studentId] !== undefined) {
+                            studentResult = { score: val.scores[studentId], totalScore: val.totalScore };
+                        }
+
+                        if (studentResult && (studentResult.score !== undefined || studentResult.degree !== undefined)) {
+                            const score = Number(studentResult.score ?? studentResult.degree ?? 0);
+                            const max = Number(studentResult.totalScore ?? studentResult.maxScore ?? val.totalScore ?? 100);
+                            totalExamScore += score;
+                            totalExamMax += max;
+                            examCount++;
+
+                            const key = getMonthKey(val.date || studentResult.date || val.createdAt);
+                            ensureMonth(key);
+                            monthlyData[key].exams.push({ score, max });
                         }
                     });
 
-                    if (count > 0) {
-                        examAvg = Math.round((totalScore / totalMax) * 100);
-                    }
+                    // ج) جلب المدفوعات ومتأخرات الشهور
+                    // 1. فحص كولكشن المدفوعات الفرعي
+                    const paySnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/payments`));
+                    paySnap.forEach(d => {
+                        const val = d.data();
+                        const pPaid = Number(val.amountPaid || val.paid || val.amount || 0);
+                        const pDue = Number(val.amountDue || val.due || 0);
+                        totalPaid += pPaid;
+                        totalDue += pDue;
 
-                    // ج) جلب المدفوعات (من ملف الطالب نفسه أو Subcollection)
+                        const key = val.month ? val.month : getMonthKey(val.date || val.createdAt);
+                        ensureMonth(key);
+                        monthlyData[key].paid += pPaid;
+                        monthlyData[key].due += pDue;
+                    });
+
+                    // 2. فحص مصفوفة payments في وثيقة الطالب
                     if (studentDoc.payments && Array.isArray(studentDoc.payments)) {
                         studentDoc.payments.forEach(p => {
-                            paid += Number(p.amountPaid || p.amount || 0);
-                            due += Number(p.amountDue || p.due || 0);
-                        });
-                    } else {
-                        const paySnap = await getDocs(collection(db, `users/${teacherId}/students/${studentId}/payments`));
-                        paySnap.forEach(d => {
-                            const val = d.data();
-                            paid += Number(val.amountPaid || val.paid || 0);
-                            due += Number(val.amountDue || val.due || 0);
+                            const pPaid = Number(p.amountPaid || p.amount || p.paid || 0);
+                            const pDue = Number(p.amountDue || p.due || 0);
+                            totalPaid += pPaid;
+                            totalDue += pDue;
+
+                            const key = p.month ? p.month : getMonthKey(p.date || p.createdAt);
+                            ensureMonth(key);
+                            monthlyData[key].paid += pPaid;
+                            monthlyData[key].due += pDue;
                         });
                     }
+
+                    // 3. فحص كولكشن المدفوعات العام للمدرس
+                    const globalPaySnap = await getDocs(collection(db, `users/${teacherId}/payments`));
+                    globalPaySnap.forEach(d => {
+                        const val = d.data();
+                        if (val.studentId === studentId) {
+                            const pPaid = Number(val.amountPaid || val.amount || val.paid || 0);
+                            const pDue = Number(val.amountDue || val.due || 0);
+                            totalPaid += pPaid;
+                            totalDue += pDue;
+
+                            const key = val.month ? val.month : getMonthKey(val.date || val.createdAt);
+                            ensureMonth(key);
+                            monthlyData[key].paid += pPaid;
+                            monthlyData[key].due += pDue;
+                        }
+                    });
                 }
 
-                // تحديث الأرقام
-                document.getElementById('stat-payments').innerText = paid + " ج.م";
-                document.getElementById('stat-due').innerText = due + " ج.م";
-                document.getElementById('stat-absence').innerText = absences + " أيام";
-                document.getElementById('stat-score').innerText = examAvg + "%";
+                // تحديث الإجمالي الكلي
+                let overallScoreAvg = examCount > 0 ? Math.round((totalExamScore / totalExamMax) * 100) : 0;
+                document.getElementById('stat-payments').innerText = totalPaid + " ج.م";
+                document.getElementById('stat-due').innerText = totalDue + " ج.م";
+                document.getElementById('stat-absence').innerText = totalAbsences + " أيام";
+                document.getElementById('stat-score').innerText = overallScoreAvg + "%";
+
+                // بناء واجهة التقارير الشهرية المنظمة
+                const container = document.getElementById('monthly-container');
+                container.innerHTML = "";
+
+                const sortedMonths = Object.keys(monthlyData).sort().reverse();
+
+                if (sortedMonths.length === 0) {
+                    container.innerHTML = `<p class="text-xs text-slate-400 text-center py-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">لا توجد سجلات شهرية مسجلة بعد.</p>`;
+                } else {
+                    sortedMonths.forEach(mKey => {
+                        const data = monthlyData[mKey];
+
+                        // تنسيق تاريخ الشهر للعرض (مثال: 2026-07 -> يوليو 2026)
+                        let displayMonth = mKey;
+                        if (mKey.includes('-')) {
+                            const [year, monthNum] = mKey.split('-');
+                            const idx = parseInt(monthNum, 10) - 1;
+                            if (idx >= 0 && idx < 12) {
+                                displayMonth = `${monthNames[idx]} ${year}`;
+                            }
+                        }
+
+                        // متوسط درجات الشهر
+                        let mExamAvg = "لا يوجد";
+                        if (data.exams.length > 0) {
+                            let mScore = 0, mMax = 0;
+                            data.exams.forEach(e => { mScore += e.score; mMax += e.max; });
+                            mExamAvg = Math.round((mScore / mMax) * 100) + "%";
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = "bg-slate-50 rounded-xl p-3.5 border border-slate-200 text-xs space-y-2";
+                        card.innerHTML = `
+                            <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+                                <span class="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                                    <i class="fa-regular fa-calendar text-indigo-500"></i>
+                                    شهر ${displayMonth}
+                                </span>
+                                <span class="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full text-[10px] font-semibold">مستقر</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-slate-600 pt-1">
+                                <div><i class="fa-solid fa-wallet text-emerald-500 ml-1"></i> مدفوع: <strong class="text-slate-800">${data.paid} ج.م</strong></div>
+                                <div><i class="fa-solid fa-circle-exclamation text-rose-500 ml-1"></i> متبقي: <strong class="text-slate-800">${data.due} ج.م</strong></div>
+                                <div><i class="fa-solid fa-user-xmark text-amber-500 ml-1"></i> غياب: <strong class="text-slate-800">${data.absences} أيام</strong></div>
+                                <div><i class="fa-solid fa-chart-line text-blue-500 ml-1"></i> امتحانات: <strong class="text-slate-800">${mExamAvg}</strong></div>
+                            </div>
+                        `;
+                        container.appendChild(card);
+                    });
+                }
 
                 statusMsg.className = "hidden";
                 document.getElementById('student-card').classList.remove('hidden');
